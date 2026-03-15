@@ -1,0 +1,30 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.pyc
+*.pyd
+*.pyo
+*.egg-info/
+.Python
+build/
+dist/
+venv/
+env/
+
+# MyPy
+.mypy_cache/
+
+# Sphinx documentation
+docs/_build/
+
+# Django stuff:
+*.log
+*.pot
+*.mo
+*.xml
+*.html
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# Virtual Environment
+.venv
