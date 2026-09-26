@@ -16,7 +16,6 @@ Autore: @peppeson
 """
 
 import http.server
-import socketserver
 import urllib.parse
 import subprocess
 import os
@@ -24,7 +23,7 @@ import json
 import threading
 import time
 import queue
-from pathlib import Path
+import uuid
 from socketserver import ThreadingTCPServer
 
 PORT = 8080
@@ -32,6 +31,12 @@ RAR_PATH = "/usr/local/bin/rar"
 ROOT_PATH = "/volume1"
 
 streaming_sessions = {}
+
+def is_within_root(path):
+    """Vero se il percorso (risolti symlink e '..') sta dentro ROOT_PATH."""
+    real_root = os.path.realpath(ROOT_PATH)
+    real_path = os.path.realpath(path)
+    return os.path.commonpath([real_root, real_path]) == real_root
 
 class RARRepairHandler(http.server.BaseHTTPRequestHandler):
     
@@ -97,7 +102,8 @@ class RARRepairHandler(http.server.BaseHTTPRequestHandler):
         path = params.get('path', [ROOT_PATH])[0]
         filter_type = params.get('filter', ['all'])[0]
         
-        if not os.path.abspath(path).startswith(os.path.abspath(ROOT_PATH)):
+        path = os.path.normpath(path)
+        if not is_within_root(path):
             path = ROOT_PATH
         
         result = self.browse_directory(path, filter_type)
@@ -184,7 +190,6 @@ class RARRepairHandler(http.server.BaseHTTPRequestHandler):
         return breadcrumb
     
     def start_repair_stream(self, rev_file):
-        import uuid
         session_id = str(uuid.uuid4())
         
         output_queue = queue.Queue()
@@ -202,6 +207,11 @@ class RARRepairHandler(http.server.BaseHTTPRequestHandler):
     def run_repair_with_streaming(self, rev_file, output_queue, session_id):
         process = None
         try:
+            if not is_within_root(rev_file):
+                output_queue.put(f"❌ Errore: il file deve trovarsi sotto {ROOT_PATH}\n")
+                output_queue.put("__DONE__")
+                return
+
             if not os.path.exists(rev_file):
                 output_queue.put(f"❌ Errore: File non trovato: {rev_file}\n")
                 output_queue.put("__DONE__")
@@ -288,7 +298,6 @@ class RARRepairHandler(http.server.BaseHTTPRequestHandler):
                         self.wfile.write(f"event: done\ndata: \n\n".encode())
                         break
                     
-                    import json
                     escaped_data = json.dumps(data)
                     self.wfile.write(f"data: {escaped_data}\n\n".encode())
                     self.wfile.flush()
@@ -528,11 +537,19 @@ class RARRepairHandler(http.server.BaseHTTPRequestHandler):
                     updateBreadcrumb(result.breadcrumb);
                     updateFileList(result.items);
                 } else {
-                    fileListEl.innerHTML = `<div style="padding: 20px; text-align: center; color: red;">❌ Errore: ${result.error}</div>`;
+                    showListError(`❌ Errore: ${result.error}`);
                 }
             } catch (error) {
-                fileListEl.innerHTML = `<div style="padding: 20px; text-align: center; color: red;">❌ Errore di connessione: ${error.message}</div>`;
+                showListError(`❌ Errore di connessione: ${error.message}`);
             }
+        }
+
+        function showListError(message) {
+            const fileListEl = document.getElementById('fileList');
+            const errorEl = document.createElement('div');
+            errorEl.style.cssText = 'padding: 20px; text-align: center; color: red;';
+            errorEl.textContent = message;
+            fileListEl.replaceChildren(errorEl);
         }
         
         function updateBreadcrumb(breadcrumb) {
@@ -577,11 +594,22 @@ class RARRepairHandler(http.server.BaseHTTPRequestHandler):
                     else icon = '📄';
                 }
                 
-                fileItem.innerHTML = `
-                    <div class="file-icon">${icon}</div>
-                    <div class="file-name">${item.name}</div>
-                    ${item.size ? `<div class="file-size">${formatFileSize(item.size)}</div>` : ''}
-                `;
+                const iconEl = document.createElement('div');
+                iconEl.className = 'file-icon';
+                iconEl.textContent = icon;
+                fileItem.appendChild(iconEl);
+
+                const nameEl = document.createElement('div');
+                nameEl.className = 'file-name';
+                nameEl.textContent = item.name;
+                fileItem.appendChild(nameEl);
+
+                if (item.size) {
+                    const sizeEl = document.createElement('div');
+                    sizeEl.className = 'file-size';
+                    sizeEl.textContent = formatFileSize(item.size);
+                    fileItem.appendChild(sizeEl);
+                }
                 
                 fileItem.addEventListener('click', () => {
                     if (item.type === 'directory' || item.type === 'parent') {
@@ -709,15 +737,6 @@ class RARRepairHandler(http.server.BaseHTTPRequestHandler):
             cancelBtn.textContent = 'Annulla Riparazione';
             
             currentSessionId = null;
-        }
-
-        function shutdownServer() {
-            if (confirm('Sei sicuro di voler fermare il server?')) {
-                fetch('/shutdown', { method: 'POST' })
-                .finally(() => {
-                    document.body.innerHTML = '<div style="padding: 50px; text-align: center; font-size: 1.2em;"><h1>Server fermato.</h1><p>Puoi chiudere questa finestra.</p></div>';
-                });
-            }
         }
     </script>
 </body>
